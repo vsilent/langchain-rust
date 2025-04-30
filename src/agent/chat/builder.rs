@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use crate::{
     agent::AgentError,
-    chain::{llm_chain::LLMChainBuilder, options::ChainCallOptions},
+    chain::{llm_chain::LLMChainBuilder, options::ChainCallOptions, llm_chain::LLMChain},
     language_models::llm::LLM,
     tools::Tool,
+    chain::Chain,
 };
 
 use super::{
@@ -18,7 +19,7 @@ pub struct ConversationalAgentBuilder {
     prefix: Option<String>,
     suffix: Option<String>,
     options: Option<ChainCallOptions>,
-    chain: Option<Box<LLMChainBuilder>>,
+    chain: Option<Box<LLMChain>>,
 }
 
 impl ConversationalAgentBuilder {
@@ -52,31 +53,32 @@ impl ConversationalAgentBuilder {
         self
     }
 
-    pub fn chain(mut self, chain: Box<LLMChainBuilder>) -> Self {
-        let default_options = ChainCallOptions::default().with_max_tokens(1000);
-        self.chain = Some(chain.or_else(|| {
-            Some(
-                Box::new(
-                    LLMChainBuilder::new()
-                        .prompt(prompt)
-                        .llm(llm)
-                        .options(self.options.unwrap_or(default_options))
-                        .build()?,
-                )
-            )
-        }));
+    pub fn chain(mut self, chain: Box<LLMChain>) -> Self {
         self.chain = Some(chain);
         self
     }
 
-    pub fn build<L: Into<Box<dyn LLM>>>(self, llm: L) -> Result<ConversationalAgent, AgentError> {
+    pub fn build<L: Into<Box< dyn LLM>>>(self, llm: L) -> Result<ConversationalAgent, AgentError> {
         let tools = self.tools.unwrap_or_default();
         let prefix = self.prefix.unwrap_or_else(|| PREFIX.to_string());
         let suffix = self.suffix.unwrap_or_else(|| SUFFIX.to_string());
         let prompt = ConversationalAgent::create_prompt(&tools, &suffix, &prefix)?;
+        let default_options = ChainCallOptions::default().with_max_tokens(1000);
+
+        let chain = match self.chain {
+            Some(existing_chain) => existing_chain,
+            None => {
+                let llm_chain = LLMChainBuilder::new()
+                    .prompt(prompt)
+                    .llm(llm)
+                    .options(self.options.unwrap_or(default_options))
+                    .build()?; 
+                Box::new(llm_chain)
+            }
+        };
 
         Ok(ConversationalAgent {
-            chain: self.chain,
+            chain,
             tools,
             output_parser: ChatOutputParser::new(),
         })
