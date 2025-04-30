@@ -18,6 +18,7 @@ pub struct ConversationalAgentBuilder {
     prefix: Option<String>,
     suffix: Option<String>,
     options: Option<ChainCallOptions>,
+    chain: Option<Box<LLMChainBuilder>>,
 }
 
 impl ConversationalAgentBuilder {
@@ -27,6 +28,7 @@ impl ConversationalAgentBuilder {
             prefix: None,
             suffix: None,
             options: None,
+            chain: None,
         }
     }
 
@@ -50,23 +52,31 @@ impl ConversationalAgentBuilder {
         self
     }
 
+    pub fn chain(mut self, chain: Box<LLMChainBuilder>) -> Self {
+        let default_options = ChainCallOptions::default().with_max_tokens(1000);
+        self.chain = Some(chain.or_else(|| {
+            Some(
+                Box::new(
+                    LLMChainBuilder::new()
+                        .prompt(prompt)
+                        .llm(llm)
+                        .options(self.options.unwrap_or(default_options))
+                        .build()?,
+                )
+            )
+        }));
+        self.chain = Some(chain);
+        self
+    }
+
     pub fn build<L: Into<Box<dyn LLM>>>(self, llm: L) -> Result<ConversationalAgent, AgentError> {
         let tools = self.tools.unwrap_or_default();
         let prefix = self.prefix.unwrap_or_else(|| PREFIX.to_string());
         let suffix = self.suffix.unwrap_or_else(|| SUFFIX.to_string());
-
         let prompt = ConversationalAgent::create_prompt(&tools, &suffix, &prefix)?;
-        let default_options = ChainCallOptions::default().with_max_tokens(1000);
-        let chain = Box::new(
-            LLMChainBuilder::new()
-                .prompt(prompt)
-                .llm(llm)
-                .options(self.options.unwrap_or(default_options))
-                .build()?,
-        );
 
         Ok(ConversationalAgent {
-            chain,
+            chain: self.chain,
             tools,
             output_parser: ChatOutputParser::new(),
         })
